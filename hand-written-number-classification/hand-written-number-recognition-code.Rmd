@@ -1,0 +1,514 @@
+---
+title: "Hand-written Number Recognition"
+output: html_notebook
+---
+
+```{r echo=TRUE}
+train <- read.csv("Train_Digits_20180302.csv", header=TRUE, sep=",")
+test <- read.csv("Test_Digits_20180302.csv", header=TRUE, sep=",")
+
+#head(train)
+#head(test)
+#str(train$Digit)
+
+```
+
+#Overview and transformation of variables  
+
+1. Convert output variable into binary values with 0 for even and 1 for odd 
+```{r echo=TRUE}
+train$Digit <- train$Digit %% 2
+#class(train$Digit) 
+```
+
+2. Take out variables with only 0's in them
+```{r echo=TRUE}
+#train
+#zero <- apply(train, 2, sum) < 1 
+#train <- train[,zero==FALSE]
+#head(train)
+
+#we use 1 as a place holder instead of the NA values 
+#test$Digit <- 1
+#test <- test[,zero==FALSE]
+#head(test)
+
+library(caret)
+#near zero variables 
+nzv <- nearZeroVar(train)
+train.nzv <- train[,-nzv]
+#head(train.nzv)
+train.nzv <- data.frame(train.nzv[,1],round(train.nzv[,2:248],2))
+#head(train.nzv)
+
+colnames(train.nzv)[1] <- "Digit"
+
+train <- train.nzv
+head(train)
+
+
+#aligning test set according to columns  
+test.nzv <- test[,-nzv]
+test.nzv <- data.frame(test.nzv[,1],round(test.nzv[,2:248],2))
+
+colnames(test.nzv)[1] <- "Digit"
+
+test <- test.nzv
+
+head(test.nzv)
+
+```
+
+3. Scaling the data
+```{r echo=TRUE}
+max(train)
+#[1] 255
+max(test[,2:248])
+#[1] 255
+
+#train
+train = cbind(train$Digit, train[,-1]/255)
+max(train)
+#[1] 1
+colnames(train)[1] <- "Digit"
+head(train)
+
+#test
+test = cbind(test[,1], test[,-1]/255)
+max(test[,2:248])
+#[1] 1
+colnames(test)[1] <- "Digit"
+head(test)
+
+```
+
+
+Subsetting training data in train.x which we use to build the predictors and train.y which we use to make predictions 
+```{r echo=TRUE}
+set.seed(123)
+size.sample <- 1500 #I decided for 1500 training and 1000 test observations
+index <- sample(1:nrow(train.nzv), size.sample)
+train.x <- train[index,]
+test.x <- train[-index,]
+```
+
+
+#Outline of the steps used to build a model for prediction
+
+1. Logistic regression 
+```{r echo=TRUE}
+glm.fit.x <- glm(Digit~., data=train.nzv, family=binomial, subset=index)
+summary(glm.fit.x)
+
+
+glm.probs.x <- predict(glm.fit.x, test.x, type = "response")
+
+glm.pred.x=rep(0,1000)
+glm.pred.x[glm.probs.x>.5]=1
+
+table(glm.pred.x)
+table(glm.pred.x, test.x$Digit)
+
+
+acc.lr.x <- mean(glm.pred.x == test.x$Digit)
+acc.lr.x
+
+err.lr.x <- 1- acc.lr.x
+err.lr.x
+
+#performance assessment 
+#Shrinkage
+library(glmnet)
+library(ROCR)
+shrink.x <- glmnet(train.x[,2:248], train.x, alpha = 1, standardize = TRUE, family = "binomial")
+
+#CV
+?cv.glmnet
+cv.lr <- cv.glmnet(matrix.test.x, factor.test.x, alpha = 1, nfolds=10, type.measure="auc", standardize = TRUE, family = "binomial")
+names(cv.lr)
+plot(cv.lr)
+
+#AUC
+max(cv.lr$cvm)
+min(cv.lr$cvm)
+mean(cv.lr$cvm)
+
+#AUC
+matrix.test.x <- as.matrix(test.x[,-1])
+factor.test.x <- as.factor(test.x[,1])
+
+glm.probs.test <- predict(glm.fit.x, newx = matrix.test.x, s= cv.lr$lambda.min, type="response")
+
+glm.pred.test=rep(0,1000)
+glm.pred.test[glm.probs.test$fit>.5]=1
+
+glm.pred.test <- glm.pred.test[1:1000]
+
+
+glm.predictions.test <- prediction(glm.probs.test, factor.test.x)
+
+
+performance(glm.predictions.test, measure = "auc")@y.values[[1]]
+```
+
+2. Discriminant Analysis 
+2.1 Linear Discriminant Analysis 
+```{r fig.height=10, fig.width=10, echo=TRUE}
+library(MASS)
+lda.fit <- lda(Digit~., data=train, subset = index)
+lda.fit$prior
+plot(lda.fit)
+
+#prediction
+lda.pred <- predict(lda.fit, test.x)
+lda.class <- lda.pred$class 
+
+table(lda.class, test.x$Digit)
+mean(lda.class == test.x$Digit)
+#[1] 0.797
+```
+
+2.2 Quadratic Discriminant Analysis
+```{r echo=TRUE}
+qda.fit <- qda(Digit~., data=train, subset = index)
+qda.fit$prior
+
+#prediction
+qda.pred <- predict(qda.fit, test.x)
+qda.class <- qda.pred$class 
+
+table(qda.class, test.x$Digit)
+mean(qda.class == test.x$Digit)
+#[1] 0.866
+```
+
+
+3. K-nearest Neighbors
+```{r echo=TRUE}
+library(class)
+
+#k=1
+knn.pred1 <- knn(train.x, test.x, train.x$Digit, k=1)
+length(knn.pred1)
+table(knn.pred1, test.x$Digit)
+
+mean(knn.pred1==test.x$Digit)
+#[1] 0.944
+
+#Cross Validation
+trControl <- trainControl(method  = "cv",
+                          number  = 10)
+
+?train
+fit <- train(Digit ~ .,
+             method     = "knn",
+             tuneGrid   = expand.grid(k = 1:10),
+             trControl  = trControl,
+             metric     = "Accuracy",
+             data       = train.x)
+
+fit
+
+plot(fit)
+
+#AUC
+library(pROC)
+test.x.num = test.x
+test.x.num$Digit <- as.numeric(test.x$Digit)
+knnPredict <- predict(fit,newdata = test.x.num)
+knnPredict <- as.numeric(knnPredict)
+
+knnROC <- roc(test.x.num$Digit,knnPredict, levels = c(0,1), auc=TRUE)
+knnROC
+
+auc.knn <- performance(knnPredict,"auc"); auc <- as.numeric(auc.knn@y.values)
+
+```
+
+
+4. Tree-based methods
+4.1 Classification Trees 
+```{r fig.height=5, fig.width=10, echo=TRUE}
+library(tree)
+#
+train$Digit = as.factor(train$Digit)
+train.x$Digit = as.factor(train.x$Digit)
+test.x$Digit = as.factor(test.x$Digit)
+
+#building the tree
+tree.x <- tree(Digit~., data = train, subset=index)
+summary(tree.x)
+
+plot(tree.x)
+text(tree.x, pretty=0)
+
+tree.x
+
+#predictions 
+tree.pred.x <- predict(tree.x, test.x, type="class")
+table(tree.pred.x, test.x$Digit)
+
+mean(tree.pred.x==test.x$Digit)
+#[1] 0.832
+
+#pruning the tree
+cv.tree.x <- cv.tree(tree.x, FUN=prune.misclass)
+cv.tree.x
+
+par(mfrow=c(1,2))
+plot(cv.x$size, cv.x$dev, type="b", ylab = "Cross Validation Error Rate", xlab = "Tree Size")
+plot(cv.x$k[1:8], cv.x$dev[1:8], type = "b", ylab = "Cross Validation Error Rate", xlab = "K")
+
+prune.x <- prune.misclass(tree.x, best=9)
+plot(prune.x)
+text(prune.x, pretty=0)
+
+prune.pred <- predict(prune.x, test.x, type="class")
+table(prune.pred, test.x$Digit)
+
+mean(prune.pred==test.x$Digit)
+#[1] 0.809
+
+
+```
+
+
+4.2 Bagging
+```{r fig.height=10, fig.width=10, echo=TRUE}
+library(randomForest)
+set.seed(123)
+
+bag.x = randomForest(Digit ~., data =  train.x, ytest = test.x$Digit, xtest = test.x[-1], mtry=247, ntree=1000, importance=TRUE, do.trace = 100)
+bag.x
+
+# choose number of trees:
+head(bag.x$err.rate)
+plot(bag.x$err.rate[,1], type="s", xlab="Number of Trees", ylab="OOB Error")
+
+# variable importance plot:
+varImpPlot(bag.x, type=2)
+
+
+```
+
+
+4.3 Random Forests
+```{r fig.height=10, fig.width=10, echo=TRUE}
+rf.x <- randomForest(Digit ~., data =  train.x, ntree=1000, importance=TRUE, do.trace = 100, ytest = test.x$Digit, xtest = test.x[-1])
+rf.x
+
+plot(rf.x$err.rate[,1],type="l")
+
+#Compare the OOB Plots from Bagging and Random Forests
+# compare OOB errors:
+plot(rf.x$err.rate[,1], type="s", xlab="Number of trees", ylab="OOB Error")
+lines(bag.x$err.rate[,1], col="red")
+#abline(h=0.193)
+legend("topright", legend=c("Bagging", "Random Forest"), col=c("red", "black"), lwd=2)
+
+varImpPlot(rf.x, type=2)
+  
+```
+
+
+4.4 Boosting 
+```{r echo=TRUE}
+library(gbm)
+library(h2o)
+library(stats)
+library(base)
+h2o.init()
+localH2O = h2o.init()
+
+train.x.h2o <- as.h2o(train.x)
+test.x.h2o <- as.h2o(test.x)
+train.h2o <- as.h2o(train)
+head(train.h2o)
+ 
+?h2o.gmb
+boost.x <- h2o.gbm(x = 2:248, y = 1, training_frame = train.x.h2o, validation_frame = test.x.h2o, balance_classes = TRUE, seed = 123, nfolds = 5) 
+summary(boost.x)
+
+h2o.auc(boost.x, xval = TRUE) #?????????????
+plot(boost.x)
+abline(v=70, col="red")
+
+boost.x.opt <- h2o.gbm(x = 2:248, y = 1, training_frame = train.x.h2o, validation_frame = test.x.h2o, balance_classes = TRUE, seed = 123, nfolds = 5, ntrees = 70) 
+summary(boost.x.opt)
+plot(boost.x.opt)
+
+#boost.x.alt <- gbm(Digit~., data=train.x, distribution = "bernoulli", n.trees=3000, interaction.depth = 9)
+#summary(boost.x.alt)
+#plot(boost.x.alt)
+```
+
+
+6. Support Vector Machines
+```{r echo=TRUE}
+library(e1071)
+library(kernlab)
+library(ggplot2)
+
+train$Digit = as.factor(train$Digit)
+
+#svmfit <- svm(Digit~., data= train.x, kernel="sigmoid", gamma=0.5, cost=1, scale=FALSE, decision.values=TRUE)
+#summary(svmfit)
+
+svmfit <- svm(Digit~., data= train[index,], kernel="radial", gamma=0.01, cost=1, scale=FALSE, decision.values=TRUE)
+summary(svmfit)
+
+#Tuning 
+
+tune.svm.x <- tune(svm, Digit~., data=train[index,], kernel="radial", ranges = list(cost=c(0.1,1,10,100,1000), gamma=c(0.01, 0.1, 0.5, 1)))
+summary(tune.svm.x)
+
+tune.svm.x <- tune(svm, Digit~., data=train[index,], kernel="radial", ranges = list(cost=c(0.1,1,10,100,1000), gamma=c(0.001, 0.01, 0.1, 0.5)))
+summary(tune.svm.x)
+
+
+#prediction with optimal parameters  
+svm.opt <- svm(Digit~., data= train[index,], kernel="radial", gamma=0.01, cost=10, scale=FALSE, decision.values=TRUE)
+
+svm.pred <- predict(svm.opt, test.x[-1])
+table(pred = svm.pred, true = test.x$Digit)
+
+mean(svm.pred == test.x$Digit)
+(469+475)/1000
+
+
+#ROC
+library(pROC)
+library(ROCR)
+library(gplots)
+
+
+train.x.num <- train.x
+train.x.num$Digit <- as.numeric(train.x.num$Digit)
+roc.svm.x <- roc(train.x.num[,1], train.x.num[,-1])
+#rocplot = function(fitted, train.x){
+#  predob = prediction(fitted, train.x)
+#  perf=performance(predob, "tpr", "fpr")
+#  plot(perf)
+#}
+
+#rocplot
+
+#fitted <- attributes(predict(svmfit, train[index,],decision.values=TRUE))$decision.values
+#par(mfrow=c(1,2))
+#rocplot(fitted, train.x)
+
+
+```
+
+
+7. Neural Networks
+```{r echo=TRUE}
+library(h2o)
+
+localH2O = h2o.init()
+
+train.x.h2o <- as.h2o(train.x)
+test.x.h2o <- as.h2o(test.x)
+train.h2o <- as.h2o(train)
+test.h2o <- as.h2o(test)
+
+#Tanh
+h2o.x.dl <- h2o.deeplearning(x = 2:248, # column index for the input variables
+                            y = 1,  # column index for the response variable
+                            training_frame = train.x.h2o, # data in H2O format
+                            validation_frame = test.x.h2o,
+                            activation = "Tanh", 
+                            balance_classes = TRUE, 
+                            hidden = c(165), # one layer of 3 neurons
+                            seed = 123, 
+                            reproducible = TRUE,
+                            nfolds = 10, #Number of folds for N-fold cross-validation 
+                            epochs = 1000, variable_importances = TRUE,
+                            export_weights_and_biases = TRUE)
+h2o.x.dl
+plot(h2o.x.dl3)
+
+#variable importance
+h2o.varimp(h2o.x.dl)
+
+#weights
+h2o.weights(h2o.x.dl, matrix_id = 1)
+
+###Rectifier
+h2o.x.dl2 <- h2o.deeplearning(x = 2:248, # column index for the input variables
+                            y = 1,  # column index for the response variable
+                            training_frame = train.x.h2o, # data in H2O format
+                            validation_frame = test.x.h2o,
+                            activation = "Rectifier", 
+                            #input_dropout_ratio = 0.2, # % of inputs dropout
+                            #hidden_dropout_ratios = c(0.5,0.5,0.5), # % for neuron dropout
+                            balance_classes = TRUE, 
+                            hidden = c(165), # one layer of 3 neurons
+                            seed = 123, 
+                            reproducible = TRUE,
+                            #l1 = 1e-5,
+                            nfolds = 10, #Number of folds for N-fold cross-validation 
+                            epochs = 1000, variable_importances = TRUE,
+                            export_weights_and_biases = TRUE)
+h2o.x.dl2
+
+#Rectifier with dropout
+h2o.x.dl3 <- h2o.deeplearning(x = 2:248, # column index for the input variables
+                            y = 1,  # column index for the response variable
+                            training_frame = train.x.h2o, # data in H2O format
+                            validation_frame = test.x.h2o,
+                            activation = "RectifierWithDropout", 
+                            input_dropout_ratio = 0.5, # % of inputs dropout
+                            hidden_dropout_ratios = c(0.5), # % for neuron dropout
+                            balance_classes = TRUE, 
+                            hidden = c(165), # one layer of 3 neurons
+                            seed = 123, 
+                            reproducible = TRUE,
+                            #l1 = 1e-5,
+                            nfolds = 10, #Number of folds for N-fold cross-validation 
+                            epochs = 1000, variable_importances = TRUE,
+                            export_weights_and_biases = TRUE)
+h2o.x.dl3
+h2o.weights(h2o.x.dl3, matrix_id = 1)
+?h2o.weights
+
+#Tanh with Dropout
+h2o.x.dl4 <- h2o.deeplearning(x = 2:248, # column index for the input variables
+                            y = 1,  # column index for the response variable
+                            training_frame = train.x.h2o, # data in H2O format
+                            validation_frame = test.x.h2o,
+                            activation = "TanhWithDropout", 
+                            input_dropout_ratio = 0.5, # % of inputs dropout
+                            hidden_dropout_ratios = c(0.5), # % for neuron dropout
+                            balance_classes = TRUE, 
+                            hidden = c(165), # one layer of 3 neurons
+                            seed = 123, 
+                            reproducible = TRUE,
+                            #l1 = 1e-5,
+                            nfolds = 10, #Number of folds for N-fold cross-validation 
+                            epochs = 1000, variable_importances = TRUE,
+                            export_weights_and_biases = TRUE)
+h2o.x.dl4
+
+#weights
+#h2o.weights(h2o.x.dl, matrix_id = 1)
+
+
+test.predictions <- h2o.predict(h2o.x.dl3, newdata = test.h2o)
+names(test.predictions)
+sum(test.predictions$predict)
+
+
+
+```
+
+Export test predictions into csv file
+```{r echo=TRUE}
+h2o.exportFile(test.predictions$predict, path = "Digits_Pred_RDLTER001.csv")
+
+```
+
+
+
+
+
