@@ -1,0 +1,225 @@
+---
+title: "Credit Balance Prediction Report"
+output: html_notebook
+---
+
+#Credit Balance Prediction Model 
+The goal of this report is to predict and individual's credit balance using predictor variables. The provided Credit Balance data set consists of 400 observations and 11 variables. The first variable the credit balance is the numeric output variable. As opposed to classification problems where we are predicting a qualitative output variable we are using a regression model. We plot look at the histogram of "Balance" to get a better understanding of what we are trying to model. The histogram and the summary show that there are only positive values between 3.749 and 38,785 with a mean of 13.429. By its looks the histogram is similar to a gamma distribution.
+
+```{r echo=FALSE, eval=FALSE, include=TRUE}
+hist(data$Balance, breaks = 16, xlab = "Balance", main = "Histogram of Balance" )
+```
+
+After looking at the output variable we are using the following elements to build the prediction model:  
+
+1.Predictor Variables and Measurement Scales  
+2.Relationship between the input and output variables  
+3.Model Setup  
+4.Model accuracy and performance  
+
+1.Predictor Variables and Measurement Scales
+The data set includes data for 10 predictor variables. The structure function shows that Income is a numeric; Limit, Rating, Cards, Age and Education are integers; Gender, Student, Married are two-factor variables and Ethnicity is a three-factor variable. To find out whether an adjustment of measurement scales is needed we look at the individual plots and the structure of each predictor variable and the output variable. 
+
+Going through the plots some relationships like the one of Balance and Income or of Limit and Rating seem obvious but more about relationships later. The plot of the Cards variable displays some outliers especially for higher values.
+
+As it is the Card variable does not seem to have a format that helps us predicting the Credit Balance. We can convert the variable into a factor variable to see if we can get a clearer result. Looking at the means of the different card numbers we still cannot see a clear relationship. We transform the variable into a two-factor variable, hoping that some relationship will be visible. Our separation will be one card versus two or more cards. We will later compare model performance results based on using the original versus the new data.
+
+```{r fig.height=5, fig.width=10, echo=FALSE, eval=FALSE}
+par(mfrow=c(1,2))
+plot(data$Cards, data$Balance, main = "Balance and Cards", ylab="Balance", xlab="Cards")
+plot(tapply(data$Balance, INDEX=data$Cards, FUN = mean), ylab = "Balance", xlab="Number of Cards", main="Means of Credit Balance")
+```
+
+In the Education variable we can also spot some outliers for very few years of education and lots of years. To make sure those outliers will not bias out prediction model we are combining them. We are combining the fewest three years from 5 to 7 and the longest. Interestingly we can suppose a positive relationship between years of education and credit balance. As Income seems to have a positive relationship on credit balance as well this should not be surprising. 
+
+2.Relationship between the input and output variables 
+One way to identify relationships is to have a look at a pairwise scatterplot for all quantitative variables: 
+```{r fig.height=10, fig.width=10, echo=FALSE, eval=FALSE}
+par(mfrow=c(1,1))
+pairs(data[,1:7], pch=21)
+```
+As mentioned above we can already suspect realtionships between Income and Balance as well as between Rating and Limit and Balance. Here we have to be careful because the variables amongst themselves seem to have a very high correlation which we can assume by the plot of Limit and Rating. 
+
+A very close relationship between two variables is described as collinearity.
+
+Income and Limit have a strong linear relationship as the very small p-values indicate. Collinearity allows us to exclude data from our model because their impact is already included through another variable. As we will learn later Income will predict the Credit Balance best.   
+
+|            | Estimate|Std. Error | t-Value | p-Value   |   
+|------------|---------|-----------|---------| ----------|
+|Intercept   |4.534e+00|  4.178e-01|   10.85 | <2e-16    |
+|Limit       |1.878e-03|  7.933e-05|   23.68 | <2e-16    | 
+Table: Collinearity between Income and Limit.
+
+When we build a linear regression model for Rating and Limit we get a very high significance in the p-value as well as an adjusted R-squared of over 99%. The negative Intercept is simply an offset to allow for the  effect of the rating variable in this case. 
+
+|            | Estimate|Std. Error | t-Value | p-Value   |   
+|------------|---------|-----------|---------| ----------|
+|Intercept   |-551.9812|    28.5548|  -19.33 | <2e-16    |
+|Rating      | 14.8894 |    0.0747 |  199.32 | <2e-16    | 
+Table: Collinearity between Limit and Rating.
+
+Another set of variables to check for collinearity would be Age, Education, Student and Married. All variables could be closely related to age and whether or not someone would have studied would strongly relate to the number of years in education. As most of the variables are not numeric we cannot use a correlation matrix. Instead we use linear regression to check for collinearity. There are two "weak" relationships between Age and Married with a p-value of 14.4% and between Student and Education with a p-value of 15.0%. We can bare those relationships in mind for building out model. 
+
+Before starting to build our model we split our data in training and test set. We use roughly 80% / 20%, given our 400 observations we use 300 observations for the training and 100 for out test set.
+
+To learn more about the relationships for our model we use Forward Linear Regression. We first have a look at the Null Model and therefore the intercept. The Estimate of the Intercept (13.1730) is close to the mean of the output variable which makes sense because the equation would be 
+
+\[
+Y = \boldsymbol\beta_i * 1
+\]
+
+and the most likely outcome would be the mean of the dataset. Its high significance in the p-value (<2e-16) shows that the model rejects the H0 Hypothesis that there is no relationship between input and output variables.
+
+|            | Estimate|Std. Error | t-Value | p-Value   |   
+|------------|---------|-----------|---------| ----------|
+|Intercept   |  13.1730|    0.3223 |  40.87  | <2e-16    |
+Table: Null Model.
+
+The Intercept is the initial test for out model. Now we start using our first predictor variable Income:
+
+\[
+Y_i = \beta_{0} + \beta_{1} X_1 + \epsilon_i, i=1,\dots,p
+\]
+
+|            | Estimate|Std. Error | t-Value | p-Value   |   
+|------------|---------|-----------|---------| ----------|
+|Intercept   | 6.355094|  0.139872 |   45.44 | <2e-16    |
+|Income      | 0.154791|  0.002495 |   62.04 | <2e-16    | 
+Table: Adding the first variable: Income.
+
+Thinking about what those values actually mean, 1 unit which most probably equals USD 1000 increase in Income would result in an increase in credit balance of 0.1547 units or accordingly USD 154.7. 
+
+We can tell from the p-value that the income variable is highly significant.The predictor has a very small standard error and we can now have a look at the Adjusted R-squared which is 92.79 %, already a very high value to fit the model.
+
+We consider variable after variable, that is why the forward linear regression is a step-wise regression approach. We already know that we have to be careful with Limit and Rating. We can instantly tell that the variable does not add value to our model because its p-value is over 90%. We can explain the poor value for the model by the collinearity between the variables Income and Limit. The effect of Limit is already covered by the predictor Income. 
+
+|            | Estimate|Std. Error | t-Value | p-Value   |   
+|------------|---------|-----------|---------| ----------|
+|Intercept   |6.337e+00|  2.149e-01|  29.495 |  <2e-16   |
+|Income      |1.544e-01|  3.981e-03|  38.800 |  <2e-16   |
+|Limit       |7.057e-06|  6.353e-05|   0.111 |   0.912   |
+Table: Linear Model Coefficients for Income and Limit
+
+As a result the model remains with nearly the same R-squared as in the first step of the forward regression. The results for Rating are very close to the ones of Limits and both variables will be dropped for this model. We therefore exclude both variables from our model and look at the Cards variable.
+
+Here we can have a look at both the Cards and the CardsNew variable which we added before. We instantly see that the transformed variable CardsNew has a significantly strong impact on the output variable whereas the original variable has no relationship at all. This means that we want to include the information whether the bank customer has 1 card or more cards instead of the exact number of cards. 
+
+|            | p-value   |
+|------------|-----------|
+|Cards       | 0.929     |
+|CardsNew    | 0.0362    |
+Table: p-values of Cards variabels.
+
+Now we get to add Age to our dataset. Although we initially could not spot the relationships on the graoh - we cann see a clear realtionship between agree and credit balance. We could have guessed a realtionship according to the income realtionship - assuming that the older people get the more they earn.Consodering the very small estimate of 0.017973 we could argue not to include the variable into our model.
+
+|            | Estimate|Std. Error | t-Value | p-Value   |   
+|------------|---------|-----------|---------| ----------|
+|Intercept   |5.083805 |  0.332832 |  15.274 |  < 2e-16  |
+|Income      |0.152855 |  0.002474 | 61.792  |  < 2e-16  | 
+|CardsNew2   |0.410347 |  0.242699 |  1.691  |  0.091933 |
+|Age         |0.017973 |  0.004880 |  3.683  |  0.000274 |
+Table: Linear Model Coefficients for Income, CardsNew and Age.
+
+The transformation we made in the Education variable does not really add value to the model. The original variable fits the model better then the new variable with 
+
+|            | p-value   | Intercept |
+|------------|-----------|-----------|
+|Education   | 0.028483  | 4.49e-16  |
+|EducationNew| 0.024737  | 1.84e-15  |
+Table: p-values and Intercept of Education variabels.
+
+Our models R^2 is steadily increasing as we add new variables. We want to make sure not to overfitt the data.
+
+The variables Gender, Married, Ethnicity do not add to the significance in explaining the model. Gender and Ethnicity are not even close to being significant whereas Married could potentionally be included with a 
+- ethnicity and Married doesn't add value of 10.22% or 5.6 % depending on whether or not we include the age variable. 
+
+Playing around with the Student variable in relation to Age and Education approves that the Age variable adds value whereas Education does not as much. It seems that Student fits the model better than Education and as they are weakly collinear we can argue that only one of the variables should remain in out model. 
+
+|            | Estimate|Std. Error | t-Value | p-Value   |   
+|------------|---------|-----------|---------| ----------|
+|Intercept   | 4.937693|   0.329144|  15.002 |  < 2e-16  |
+|Income      | 0.152518|   0.002429|  62.795 |  < 2e-16  | 
+|CardsNew2   | 0.429402|   0.238173|   1.803 |  0.072425 |
+|Age         | 0.018844|   0.004794|   3.931 |  0.000106 |
+|StudentYes  | 0.991921|   0.280412|   3.537 |  0.000469 |
+Table: Linear Model Coefficients for Income, CardsNew, Age and Student. 
+
+3.Model Setup
+After looking at the relationships between the differnt models we've already done the most part of the work to build our first model. We define model.forward and model.mixedsel as the las combination of variables we have looked at above. The only differnece will be whether to add the CardsNew (in model.forward) variable or not. The third model we are including in the consideration will be a model based on Backward selection. We start with a model using all variables and then step-wise remove variables with p-values above a certain treshold. We choose 10% as our treshold. We then realizes that the model predictors equal the our forward regression model.
+
+|            | Estimate|Std. Error | t-Value | p-Value   |   
+|------------|---------|-----------|---------| ----------|
+|Intercept   |4.5380534|  0.6304816|   7.198 | 5.41e-12  |
+|Income      |0.1516959|  0.0038763|  39.134 |  < 2e-16  | 
+|CardsNew2   |0.6483078|  0.2982238|   2.174 | 0.030533  |
+|Age         |0.0181150|  0.0048626|   3.725 | 0.000235  |
+|StudentYes  |0.9340799|  0.2843156|   3.285 | 0.001145  |
+Table: Multiple Linear Regression Coefficients above treshold 10%.
+
+To write out the models we use the coefficient estimates ß0, ß1, ß2,...ßp for the least squares plane which will help us to estimate the true regression plane. 
+
+4.Model accuracy and performance
+To determine the performance of the three different models we use the following tools: 
+A) Plotting the predictions for the test data set and comparing it to the real values for Balance. 
+B) Comparing indicators for model performance:
+- Residial Standard error which indicated the deviation from the true regression line.
+- R^2 Statistic helps to determine whether and how well the variability in the regression can be explained by the model.
+- Cp
+- BIC
+
+A) When looking at the plots of real and predicted values for both teh Forward and the mixedsel model we observe that both models fit the data very well. The deviations from the 45 degree line are fairly small and we cannot observe a bias where the data points indicate a slightly different direction.  
+
+```{r fig.height=10, fig.width=10, echo=FALSE, eval=FALSE}
+par(mfrow=c(2,2))
+#plot for model.forward
+pred.forward <- predict(lm.forward, newdata=test)
+plot(pred.forward , test$Balance, ylab = "Balance Values in Testset", xlab = "Predicted Values", main = "Real Values & Predictions (Forward Model)")
+abline(c(0,0), 1, col = "red")
+
+#plot for model.mixedsel
+pred.mixedsel <- predict(lm.mixedsel, newdata=test)
+plot(pred.mixedsel, test$Balance, ylab = "Balance Values in Testset", xlab = "Predicted Values", main = "Real Values & Predictions (Mixedsel Model)")
+abline(c(0,0), 1, col = "red")
+
+#residuals plots 
+plot(predict(lm.forward), residuals(lm.forward), main="Residuals (Forward Model)", ylab="Residuals", xlab="Predicted Values")
+abline(h=0, col = "blue")
+
+plot(predict(lm.mixedsel), residuals(lm.mixedsel), main="Residuals (Mixedsel Model)", ylab="Residuals", xlab="Predicted Values")
+abline(h=0, col = "blue")
+```
+
+B) Using the regsubsets function helps us to get a better understanding of how many variables should be used in the model. 
+
+```{r fig.height=10, fig.width=10, echo=FALSE, eval=FALSE}
+regfit.full <- regsubsets(Balance~., train)
+reg.summary <- summary(regfit.full)
+
+which.max (reg.summary$adjr2)
+
+par(mfrow =c(2,2))
+plot(reg.summary$rss ,xlab=" Number of Variables ",ylab=" RSS",
+type="l")
+
+plot(reg.summary$adjr2 ,xlab =" Number of Variables ",
+ylab=" Adjusted RSq",type="l")
+
+points (7, reg.summary$adjr2[7], col ="red",cex =2, pch =20)
+
+plot(reg.summary$cp ,xlab =" Number of Variables ",ylab="Cp",
+type="l")
+which.min (reg.summary$cp )
+points (5, reg.summary$cp [5], col ="red",cex =2, pch =20)
+which.min (reg.summary$bic )
+
+plot(reg.summary$bic ,xlab=" Number of Variables ",ylab=" BIC",
+type="l")
+points (3, reg.summary$bic [3], col =" red",cex =2, pch =20)
+```
+
+Depending on the method we use the graphs above show us to use between 3 and 7 variables. The slope of Adjusted R^2 graph decreases at 3 variables but its value still increases up until 7 variables. The same behavior can be observed in the RSS graph just that the graph is decreasing instead of increasing. Mallow's Cp addresses the issue of overfitting. Its value estimated the mean squared prediction error (MSPE). The minimal value suggests the best value for the regression model. Our multiple regression model has it's minimum at 5 Variables. The Bayesian information criterion preffers the model with the lowest value. It is closely related to the Akaike information criterion (AIC) whereby the penalty term is larger in BIC. Again the value helps us to avoid overfitting our data. In our data the minimum value lyies at 3 variables. 
+
+Considering the previous steps we have taken, we can allow the use of 4 variables to predict the credit balance in a sufficient way.    
+
+For this report we will not pursue the validation set or cross validation approach. The dataset has only 400 observations and those approaches work best for larger datasets. But the general idea would be to use the training observations for the variable selection and the complete model fitting. Cross validatoin errors and validation set errors are only accurate for the test error when only the training data is used. We would often split the data into training, test and validation. We find the best subset selection using regsubsets and calculate the validation errors using a loop that returns the coeffitients of the best subset selection. 
+

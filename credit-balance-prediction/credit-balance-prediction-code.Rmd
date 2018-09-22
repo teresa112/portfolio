@@ -1,0 +1,300 @@
+---
+title: "Credit Balance Prediction Code"
+output: html_notebook
+---
+
+Setup: Reading in the data, calling packages & setting the seed
+We are working with a credit balance data set with 400 observations and 11 variables.
+```{r, eval=FALSE}
+data <- read.table("Data.txt", header=TRUE)
+
+head(data)
+
+library(MASS)
+library(ISLR)
+library(leaps)
+
+set.seed(123)
+```
+
+Output variable
+```{r, eval=FALSE}
+summary(data)
+str(data)
+hist(data$Balance, breaks = 16, xlab = "Balance", main = "Histogram of Balance" )
+```
+
+1. Predictor Variables and Measurement Scales 
+Having a look at the plots of all variables to learn about their format
+```{r, eval=FALSE}
+str(data)
+
+plot(data$Income, data$Balance)
+plot(data$Limit, data$Balance)
+plot(data$Rating, data$Balance)
+plot(data$Cards, data$Balance)
+plot(data$Education, data$Balance)
+plot(data$Age, data$Balance)
+plot(data$Gender, data$Balance)
+plot(data$Student, data$Balance)
+plot(data$Married, data$Balance)
+plot(data$Ethnicity, data$Balance)
+
+
+```
+
+Cards variable 
+```{r fig.height=10, fig.width=10, eval=FALSE}
+par(mfrow=c(1,2))
+plot(data$Cards, data$Balance, main = "Balance and Cards", ylab="Balance", xlab="Cards")
+plot(tapply(data$Balance, INDEX=data$Cards, FUN = mean), ylab = "Balance", xlab="Number of Cards", main="Means of Credit Balance")
+
+CardsNew <- ifelse(data$Cards == 1, 1, 2)
+CardsNew <- factor(CardsNew)
+data <- cbind(data, CardsNew)
+
+plot(data$CardsNew, data$Balance, main = "Balance and Cards", ylab="Balance", xlab="Cards")
+```
+
+Education variable 
+```{r, eval=FALSE}
+#Education years , grouping first few and last few 
+plot(data$Education, data$Balance)
+plot(tapply(data$Balance, INDEX=data$Education, FUN = mean))
+
+EducationNew <- ifelse(data$Education < 8, 7, data$Education)
+EducationNew <- ifelse(EducationNew > 17,18, EducationNew)
+dataNew <- data.frame(data, EducationNew)
+dataNew
+
+#look if there is a linear trend between the means
+plot(dataNew$EducationNew, dataNew$Balance)
+plot(tapply(dataNew$Balance, INDEX=dataNew$EducationNew, FUN = mean), type="l")
+```
+
+2. Relationiship between the input and output variables
+
+Ploting the pairs 
+```{r, fig.height=10, fig.width=10, eval=FALSE}
+par(mfrow=c(1,1))
+pairs(data[,1:7], pch=21)
+
+cov(data[,1:7], data[,1:7])
+```
+
+Separate the data into test and training set
+```{r, eval=FALSE}
+size.sample <- 300 #~80% 
+
+index <- sample(1:nrow(data), size.sample)
+train <- dataNew[index,]
+test <- dataNew[-index,]
+```
+
+Collinearity
+```{r, eval=FALSE}
+#collinearity between income and limit
+summary(lm(Balance~Limit, data=dataNew))
+
+#Then have a look at Rating and Limit. Strongly correlating values should be 
+summary(lm(Limit~Rating, data=dataNew))
+
+#Age & Married
+summary(lm(Age~Married, data=dataNew)) #weak relationship 14.4%
+
+#Age & Education
+summary(lm(Age~Education, data=dataNew)) #no relationship
+
+#Age & Student
+summary(lm(Age~Student, data=dataNew)) #no or very weak relationship
+
+#Student & Education
+summary(lm(Education~Student, data=dataNew)) #weak relationship
+```
+
+
+
+Forward linear regression
+```{r, eval=FALSE}
+#intercept 
+summary(lm(Balance~1, data=train))
+
+#we start with Income because of the corelation in the plot 
+summary(lm(Balance~Income, data=train))
+
+#Add limit  / Rating
+summary(lm(Balance~Income + Limit, data=train))
+summary(lm(Balance~Income + Rating, data=train))
+
+#Add Cards
+summary(lm(Balance~Income + Cards, data=train))
+summary(lm(Balance~Income + CardsNew, data=train))
+AIC(lm(Balance~Income + Cards, data=train))
+AIC(lm(Balance~Income + CardsNew, data=train))
+
+#Add age
+summary(lm(Balance~Income + CardsNew + Age, data=train))
+
+#Add Education
+summary(lm(Balance~Income + CardsNew + Age + Education, data=train))
+summary(lm(Balance~Income + CardsNew + Age + EducationNew, data=train))
+
+summary(lm(Balance~Income + CardsNew + Education, data=train))
+summary(lm(Balance~Income + CardsNew + EducationNew, data=train))
+
+#Add Gender
+summary(lm(Balance~Income + CardsNew + Age + EducationNew + Gender, data=train))
+summary(lm(Balance~Income + CardsNew + EducationNew + Gender, data=train))
+
+#Add Married
+summary(lm(Balance~Income + CardsNew + Age + EducationNew + Married, data=train))
+summary(lm(Balance~Income + CardsNew + EducationNew + Married, data=train))
+
+#Add Ethnicity
+summary(lm(Balance~Income + CardsNew + Age + EducationNew + Ethnicity, data=train))
+summary(lm(Balance~Income + CardsNew + EducationNew + Ethnicity, data=train))
+
+#Add Student
+summary(lm(Balance~Income + CardsNew + Age + EducationNew + Student, data=train))
+summary(lm(Balance~Income + CardsNew + EducationNew + Student, data=train))
+
+summary(lm(Balance~Income + CardsNew + Age + Student, data=train)) #seems to fit the model best 
+summary(lm(Balance~Income + CardsNew + Student, data=train))
+
+#Check the model without the CardsNew Variable 
+summary(lm(Balance~Income + Age + Student, data=train))
+```
+
+3.	Model Setup
+
+model.forward
+```{r, eval=FALSE}
+X1 <- test$Income
+X12 <- test$CardsNew
+X5 <- test$Age
+X8 <- test$Student
+
+model.forward <- function(X1, X12, X5, X8){
+  Y = 4.937693 + 0.152518 * X1 + 0.429402 * X12 +  0.018844 * X5 + 0.991921 * X8
+}
+```
+
+model.mixedsel
+```{r, fig.height=10, fig.width=10, eval=FALSE}
+model.mixedsel <- function(X1, X5, X8){
+  Y = 5.241914 +  0.152686 * X1 + 0.019869 * X5 + 0.980487 * X8
+}
+
+```
+
+model.multiple
+```{r, eval=FALSE}
+lm.fit <- lm(Balance~.,data=train) #simple linear regression
+summary(lm.fit)
+
+summary(lm(Balance~Income + CardsNew + Age + Student + Married, data=train))
+
+model.multiple <- function(X1, X5, X8, X12){
+  Y = 4.5380534 +  0.1516959 * X1 + 0.0181150 * X5 + 0.9340799 * X8 + 0.6483078 *X12
+}
+```
+
+
+4.	Model accuracy and performance
+The two linear regression models we are comparing are: 
+```{r, eval=FALSE}
+lm.forward <- lm(Balance~Income + CardsNew + Age + Student, data=train)
+lm.mixedsel<- lm(Balance~Income + Age + Student, data=train)
+
+```
+
+Plotting the predictions 
+```{r fig.height=10, fig.width=10, eval=FALSE}
+par(mfrow=c(2,2))
+#plot for model.forward
+pred.forward <- predict(lm.forward, newdata=test)
+plot(pred.forward , test$Balance, ylab = "Balance Values in Testset", xlab = "Predicted Values", main = "Real Values & Predictions (Forward Model)")
+abline(c(0,0), 1, col = "red")
+
+#plot for model.mixedsel
+pred.mixedsel <- predict(lm.mixedsel, newdata=test)
+plot(pred.mixedsel, test$Balance, ylab = "Balance Values in Testset", xlab = "Predicted Values", main = "Real Values & Predictions (Mixedsel Model)")
+abline(c(0,0), 1, col = "red")
+
+#residuals plots 
+plot(predict(lm.forward), residuals(lm.forward), main="Residuals (Forward Model)", ylab="Residuals", xlab="Predicted Values")
+abline(h=0, col = "blue")
+
+plot(predict(lm.mixedsel), residuals(lm.mixedsel), main="Residuals (Mixedsel Model)", ylab="Residuals", xlab="Predicted Values")
+abline(h=0, col = "blue")
+```
+
+```{r, eval=FALSE}
+confint(lm.forward)
+confint(lm.mixedsel)
+
+AIC(lm.forward)
+AIC(lm.mixedsel)
+```
+
+Subset selection for multiple regression 
+
+```{r, eval=FALSE}
+regfit.full <- regsubsets(Balance~., train)
+reg.summary <- summary(regfit.full)
+
+which.max (reg.summary$adjr2)
+
+par(mfrow =c(2,2))
+plot(reg.summary$rss ,xlab=" Number of Variables ",ylab=" RSS",
+type="l")
+
+plot(reg.summary$adjr2 ,xlab =" Number of Variables ",
+ylab=" Adjusted RSq",type="l")
+
+points (7, reg.summary$adjr2[7], col ="red",cex =2, pch =20)
+
+plot(reg.summary$cp ,xlab =" Number of Variables ",ylab="Cp",
+type="l")
+which.min (reg.summary$cp )
+points (5, reg.summary$cp [5], col ="red",cex =2, pch =20)
+which.min (reg.summary$bic )
+
+plot(reg.summary$bic ,xlab=" Number of Variables ",ylab=" BIC",
+type="l")
+points (3, reg.summary$bic [3], col =" red",cex =2, pch =20)
+```
+
+
+## References
+Introduction to Statistical Learning by Gareth James, Daniela Witte, Trevor Hastie and Robert Tibshirani
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
