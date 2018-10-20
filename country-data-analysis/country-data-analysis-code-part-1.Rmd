@@ -1,0 +1,395 @@
+---
+title: "World Bank Country Data Analysis Part 1"
+output:
+  html_notebook: default
+---
+
+In the following we present the analysis for the world bank country data in R. The results are presented and interpreted in the report in more detail.
+
+Initiate packages & Set seed
+```{r}
+library(xlsx)
+library(caret)
+library(cluster)
+library(NbClust)
+library(stats)
+library(dbscan)
+library(factoextra)
+library(magrittr)
+library(FactoMineR)
+library(fpc)
+
+set.seed(123)
+```
+
+#Data Exploration
+
+Import the data
+```{r}
+#data
+#SET YOUR WORKING DIRECTORY
+countries_raw_na <- read.xlsx("Data.xlsx",1)
+  
+#the data has 192 observations and 54 variables
+#but there are various columns in teh end of the data that are only NA 
+#we remove all columns with only NA variables 
+countries_raw <- countries_raw_na[ , ! apply( countries_raw_na , 2 , function(x) all(is.na(x)) ) ] 
+head(countries_raw)
+
+#renaming the columns 
+names(countries_raw)[3:21]<- c("ForeignInvestment", "ElectricityAccess", "RenewableEnergy", "CO2Emission", "Inflation", "MobileSubscriptions", "InternetUse", "Exports", "Imports", "GDP", "MortalityMale", "MortalityFemale", "BirthRate", "DeathRate", "MortalityInfant", "LifeExpectancy", "FertilityRate", "PopulationGrowth", "UrbanPopulation")
+
+#countrygroups
+countrygroups_raw_na <- read.xlsx("Data.xlsx",2)
+
+#we remove all columns with only NA variables 
+countrygroups_raw <- countrygroups_raw_na[ , ! apply( countrygroups_raw_na , 2 , function(x) all(is.na(x)) ) ] 
+
+#renaming the columns 
+names(countrygroups_raw)[3:21]<- c("ForeignInvestment", "ElectricityAccess", "RenewableEnergy", "CO2Emission", "Inflation", "MobileSubscriptions", "InternetUse", "Exports", "Imports", "GDP", "MortalityMale", "MortalityFemale", "BirthRate", "DeathRate", "MortalityInfant", "LifeExpectancy", "FertilityRate", "PopulationGrowth", "UrbanPopulation")
+head(countrygroups_raw)
+
+
+#mapping of countries to classes 
+mapping = read.xlsx("CLASS.xlsx", 2, header = TRUE)
+head(mapping)
+
+```
+
+
+Identify rows with empty fields 
+```{r}
+#identify missing values 
+sum(is.na(countries_raw)) #63 missing
+
+#remove data that is missing more than 3 values
+count_na <- apply(countries_raw, 1, function(z) sum(is.na(z)))
+c_clean <- countries_raw[count_na < 4,]
+nrow(c_clean)
+
+#approximate missing values according to appropriate country group 
+sum(is.na(c_clean)) #21 missing
+
+for( i in 3:21){
+  for( j in 1:183){
+  if (is.na(c_clean[j,i])) {
+    index<- which(as.character(c_clean$Country[j])==as.character(mapping$CountryCode))
+    row<- mapping$GroupCode[index]
+    myvalue<-0 
+    trigger<-0
+    
+    for(x in 1:(length(row)-1)){
+      tempval<-countrygroups_raw[which(as.character(countrygroups_raw$Country)==as.character(row[x])),i]
+      if(is.na(tempval)){
+          trigger<-trigger+1
+      }else{
+          myvalue<-myvalue+tempval
+      }  
+    }
+    c_clean[j,i]<-myvalue/(length(row)-trigger-1)
+    }
+  }
+}
+
+head(c_clean)
+str(c_clean)
+
+sum(is.na(c_clean)) #0 missing 
+rownames(c_clean)<-c_clean[,1] 
+
+#c_clean is the unstandardized data 
+```
+
+
+
+Scaling & Center around 0
+If we do not scale the data before we pursue PCA the varibale with the highest variance will automatically have the largest loading. Therefore we scale the data such that the standard deviation for each variable is 1 
+```{r}
+#boxplot data
+boxplot(c_clean) #data has to be scaled otherwise GDP data get's way to much weight
+#have a look without GDP: 
+boxplot(c_clean[,c(2:11,13:21)]) #without GDP
+#--> different scales 
+
+
+# calculate the pre-process parameters from the dataset
+c_scaled_ut <- preProcess(c_clean, method=c("center","scale")) 
+
+# summarize transform parameters
+print(c_scaled_ut)
+# transform the dataset using the parameters
+c_scaled <- predict(c_scaled_ut, c_clean)
+# summarize the transformed dataset
+summary(c_scaled)
+
+
+countries <- c_scaled
+variables <- countries[,3:21]
+
+#row name
+rownames(variables)<-countries[,1] 
+
+#boxplot
+boxplot(variables, main="Boxplot of scaled and centered data")
+
+#variables is the standardized dataset
+
+```
+
+
+#Analysis
+PCA looks to find a low-dimensional representation of the observations that explain a good fraction of the variance 
+Clustering looks to find homogenous subgroups amoung the observations
+
+#Principle Component Analysis 
+
+
+PCA on the original data 
+```{r}
+###PCA original data 
+##FactoMineR & FactoExtra Package
+
+original_pca <- PCA(c_clean[3:21], scale.unit = FALSE) #PCA
+fviz_pca_biplot(original_pca, labelsize=6) #biplot for the first 2 Dimensions/PCs 
+fviz_eig(original_pca, addlabels = TRUE, ylim = c(0, 100), labelsize=6) #screeplot
+
+##R functions 
+original_pca2 <- prcomp(c_clean[3:21]) #PCA
+#print(original_pca2)
+biplot(original_pca2, main = "PCA of original data\n\n") #biplot
+#Screeplot 
+original_variance <- (original_pca2$sdev)^2
+original_max_variance <- round(max(original_variance),1)
+components <- 3:21
+plot(components, original_variance, main="Scree Plot", xlab = "Number of Components", ylab = "Variance", type = "o", col="blue", ylim = c(0,original_max_variance))
+
+```
+
+
+PCA on the standardized data  
+```{r}
+###PCA on standardized data
+##FactoMineR & FactoExtra Package
+countries_pca <- PCA(variables, scale.unit = FALSE, ncp = 19) #data is already scaled therefore scale.unit=FALSE
+principle_components <- round(countries_pca$var$coord, 3)
+principle_components7 <- principle_components[,1:7]
+fviz_pca_biplot(countries_pca, labelsize = 6) #biplot
+fviz_eig(countries_pca, addlabels = TRUE, ylim = c(0, 60), labelsize=6) #scereplot
+
+#PVE plot
+countries_eigen <- get_eigenvalue(countries_pca)
+head(countries_eigen)
+countries_pve <- countries_eigen[,3]
+plot(countries_pve, main= "PVE Plot" ,xlab = "Principle Component", ylab = "Cumulative Proportion of Variance Explained", type = "o", col="red")
+abline(v=2, col="blue")
+
+```
+
+
+#Clustering Methods 
+Therefore we need to define what is means for two or more observations to be similar or different.
+
+Distance measures
+Classification methods require some methods for measuring the distance or the (dis)similarity between the objects. For better understanding of the data we can visualize the distance matrix.
+```{r}
+pearson_dist <- get_dist(c_clean[,3:21], stand=TRUE, method="pearson") 
+#fviz_dist(pearson_dist, gradient=list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+
+```
+
+
+#Partitioning Clustering 
+K-means Clustering
+Simple and elegant approach for partitioning a data set into K distinct, non-overlapping clusters 
+
+Algorithm: 
+1 Randomly assign a number, from 1:K, to each of the observations. These serve as initial cluster assignments for the observations 
+2 Iterate until the cluster assignments stop changing: 
+a) For each of the K clusters, compute the cluster centroid. The kth cluster     centroid is the vector of the p feature means for the observations in the kth cluster
+b) Assign each observation to the cluster whose centroid is closest (according to Euclidean distance)
+```{r}
+#1 Determining the optimal number of clusters with three different methods: sums of squares, average silhouette or the gap statistic 
+
+#Factoextra library
+fviz_nbclust(variables, diss = pearson_dist, kmeans, method = "gap_stat") # k = 3 statistical testing method
+fviz_nbclust(variables, diss = pearson_dist, kmeans, method = "wss") # k = between 6 and 10 direct method
+fviz_nbclust(variables, diss = pearson_dist, kmeans, method = "silhouette") # k = 2 direct method
+
+#NbClust 
+countries_nb <- NbClust(variables, distance = NULL, diss = pearson_dist ,min.nc = 2, max.nc = 10, method = "kmeans", index = "all")
+fviz_nbclust(countries_nb)
+
+#2 K-Means k = 2 
+countries_km2 <- kmeans(variables, 2, iter.max=100,nstart = 10) # decision for k based on previous methods 
+print(countries_km2)
+
+#3 Visualization of the result 
+fviz_cluster(countries_km2, data = variables,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+
+#4 Variable means 
+km_variable_means2 <- round(aggregate(variables , by=list(cluster=countries_km2$cluster), mean),2)
+
+#5 Point classifications 
+km_points2 <- cbind(country = countries$CountryName, cluster = countries_km2$cluster)
+rownames(km_points2) <- countries$CountryName
+table(km_points2[,2])
+
+#Alternative k= 3
+#2 K-Means
+countries_km3 <- kmeans(variables, 3, iter.max=100,nstart = 10) # decision for k based on previous methods 
+print(countries_km3)
+
+#3 Visualization of the result 
+fviz_cluster(countries_km3, data = variables,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+
+#4 Variable means 
+km_variable_means3 <- round(aggregate(variables , by=list(cluster=countries_km3$cluster), mean),2)
+
+#5 Point classifications 
+km_points3 <- cbind(country = countries$CountryName, cluster = countries_km3$cluster)
+rownames(km_points3) <- countries$CountryName
+table(km_points3[,2])
+
+```
+
+
+K-Medoids Clustering 
+```{r}
+#1 choose number of clusters 
+fviz_nbclust(variables, diss = pearson_dist, pam, method = "silhouette") # k = 2 direct method
+
+#2 compute PAM Clustering 
+countries_pam <- pam(pearson_dist,2, diss=TRUE) 
+print(countries_pam)
+names(countries_pam)
+
+#3 point classification
+pam_points <- cbind(variables, cluster = countries_pam$cluster)
+head(pam_points, n = 3)
+
+#4 variable medoids
+medoids <- countries_pam$medoids
+
+#5 clustering
+head(countries_pam$clustering)
+table(countries_pam$clustering)
+
+#6 visualizeation
+clust_pam <- pam(variables,2, medoids = c(91,118)) #visualization does not work with distance vector pam value therefore work around with pam for the calculated medoids  
+fviz_cluster(clust_pam, 
+             palette = "jco", # color palette
+             repel = FALSE, 
+             ggtheme = theme_classic()
+             )
+
+#7 Silhouette Plot
+plot(silhouette(countries_pam$clustering, pearson_dist))
+countries_pam$silinfo$avg.width
+#[1] 0.5480333
+```
+
+
+#Hierarchical Clustering 
+Different to K-means Hierarchichal clustering does not require a pre-defined k. 
+
+
+Agglomerative Clustering = bottom up 
+```{r}
+#1 Distance measures 
+#as.matrix(pearson_dist)
+
+#2 Linkage Ward2 
+countries_hc_w <- hclust(d = pearson_dist, method = "ward.D2")
+#d = dissimilarity structure 
+#method agglomeration linkage: "ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median" or "centroid".
+
+#3 Dendrogramm
+fviz_dend(countries_hc_w, cex= 0.5)
+
+#4 Choice of dissimilarity measure: 3 methods
+#cophenetic - values >0.75
+countries_coph <- cophenetic(countries_hc_w) 
+cor(pearson_dist, countries_coph) #Correlation between cophenetic distance and the original distance
+#[1] 0.8077969
+countries_cor_w <- cor(pearson_dist, countries_coph)
+fviz_dend(countries_hc_w, cex= 0.5, main=paste("Dendrogram for data: Coph= ",+round(countries_cor_w,2)))
+
+##average silhoutte width 
+#plot(silhouette(cutree(countries_hc_w,k=3),dist(pearson_dist)))
+#average silhouette width = 0.2 --> not ideal
+
+##gap statistic
+#clusGap(variables, FUNcluster = cluster , K.max = 10, B = 100, verbose = TRUE)
+
+#5 Cut the dendrogramm into different groups 
+countries_cutree <- cutree(countries_hc_w, k=3) 
+table(countries_cutree) #Number of members in each cluster
+hier_clusts <- cbind(countries[,2], countries_cutree)
+rownames(hier_clusts) <- countries[,2]
+
+#6 color the dendrogram by groups 
+fviz_dend(countries_hc_w, k = 3, # Cut in four groups
+          cex = 0.5, # label size
+          k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"),
+          color_labels_by_k = TRUE, # color labels by groups
+          rect = TRUE # Add rectangle around groups
+          )
+
+#7 result as scatter plot
+fviz_cluster(list(data = variables, cluster = countries_cutree),
+             palette = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"), 
+             ellipse.type = "convex", # Concentration ellipse
+             repel = FALSE, # Avoid label overplotting (slow)
+             show.clust.cent = FALSE, ggtheme = theme_minimal())
+
+#8 variable means 
+countries_w_means <- round(aggregate(variables , by=list(cluster=countries_cutree), mean),2)
+
+```
+
+
+Cluster package 
+The R package cluster makes it easy to perform cluster analysis in R. It provides the function agnes() and diana() for computing agglomerative and divisive clustering, respectively. These functions perform all the necessary steps for you. You don't need to execute the scale(), dist() and hclust() function separately.
+```{r}
+##cluster
+#Average linkage
+countries_average <- agnes(x = pearson_dist, # data matrix
+                   stand = TRUE, # Standardize the data
+                   method = "average" # Linkage method
+                   )
+
+#dendrogramm
+fviz_dend(countries_average, cex = 0.6, k = 3)
+
+#Complete linkage
+countries_complete <- agnes(x = pearson_dist, # data matrix
+                   stand = TRUE, # Standardize the data
+                   method = "complete" # Linkage method
+                   )
+
+#dendrogramm
+fviz_dend(countries_complete, cex = 0.6, k = 3)
+
+#cutree
+countries_cutree_complete <- cutree(countries_complete, k=3) 
+
+fviz_cluster(list(data = variables, cluster = countries_cutree_complete),
+             palette = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"), 
+             ellipse.type = "convex", # Concentration ellipse
+             repel = FALSE, # Avoid label overplotting (slow)
+             show.clust.cent = FALSE, ggtheme = theme_minimal())
+#looks exactly like the ward linkage graph
+
+```
+
+
+
+
+
+
